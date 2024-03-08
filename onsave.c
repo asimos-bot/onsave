@@ -17,26 +17,38 @@ int main(int argc, char** argv) {
     char* filename = "README.md";
     int wd = inotify_add_watch(fd, filename, FLAGS);
 
-
     char buf[4096] = {0};
     ssize_t len = read(fd, buf, sizeof(buf));
     const struct inotify_event *event;
     for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
         event = (struct inotify_event*) ptr;
 
-           /* Print event type. */
-           if (event->mask & IN_OPEN)
-               printf("IN_OPEN: ");
-           if (event->mask & IN_CLOSE_NOWRITE)
-               printf("IN_CLOSE_NOWRITE: ");
-           if (event->mask & IN_CLOSE_WRITE)
-               printf("IN_CLOSE_WRITE: ");
-           if (event->len)
-               printf("%s", event->name);
-           if (event->mask & IN_ISDIR)
-               printf(" [directory]\n");
-           else
-               printf(" [file]\n");
+        if(event->mask & IN_DELETE) {
+            printf("IN_DELETE ");
+        }
+        if(event->mask & IN_DELETE_SELF) {
+            printf("IN_DELETE_SELF ");
+        }
+        if(event->mask & IN_MOVE_SELF) {
+            printf("IN_MOVE_SELF ");
+        }
+        if(event->mask & IN_MOVE) {
+            printf("IN_MOVE ");
+        }
+        if(event->mask & IN_CREATE) {
+            printf("IN_CREATE ");
+        }
+        if(event->mask & IN_MODIFY) {
+            printf("IN_MODIFY ");
+        }
+        if(event->mask & IN_ATTRIB) {
+            printf("IN_ATTRIB ");
+        }
+
+       if (event->mask & IN_ISDIR)
+           printf(" [directory]\n");
+       else
+           printf(" [file]\n");
     }
 
     return 0;

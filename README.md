@@ -1,6 +1,6 @@
 ## Onsave
 
-Run command when there is a change to files or directories.
+Lightweight program that run command when there is a change to files or directories.
 
 ## Build
 
@@ -14,7 +14,7 @@ make build
 
 ## Usage
 
-Usage: `onsave [OPTIONS] [FILES ...]`
+Usage: `onsave [OPTIONS] [FILES ...] COMMAND`
 
 * `-o / --once` - run only once
 * `-h / --help` - help menu
