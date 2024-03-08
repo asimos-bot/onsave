@@ -11,13 +11,3 @@ Requirements:
 ```
 make build
 ```
-
-## Usage
-
-Usage: `onsave [OPTIONS] [FILES ...] COMMAND`
-
-* `-o / --once` - run only once
-* `-h / --help` - help menu
-* `--exclude` - don't watch these files / directories
-* `-g / --git` - git only
-* `-f / --flags` - choose flags to watch 

@@ -3,9 +3,9 @@
 TARGET=onsave
 CC=clang
 build:
-	 $(CC) $$(cat config | awk '{ print "-D" $$1 }' | tr '\n' ' ') `pkg-config --cflags libnotify` $(TARGET).c -o $(TARGET) `pkg-config --libs libnotify`
+	 $(CC) $(TARGET).c -o $(TARGET)
 run: build
-	./$(TARGET)
+	./$(TARGET) README.md echo hello
 install: build
 	mkdir -p ~/.local/bin/
 	cp $(TARGET) ~/.local/bin/
