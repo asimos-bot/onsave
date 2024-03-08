@@ -19,16 +19,16 @@ typedef struct ONSAVE_CONFIG {
     unsigned int target_idx; // command start idx is this + 1
     unsigned int config_idx;
     unsigned int ignore_len;
-    unsigned int* ignore_list;
+    unsigned int* ignore_arr;
 } ONSAVE_CONFIG;
 
 void help() {
     printf("onsave [OPTIONS] [FILE|DIRECTORY] [COMMAND...]\n");
-    printf("-o / --once   - run only once\n");
-    printf("-h / --help   - show this help menu\n");
-    printf("-g / --git    - use only git tracked files\n");
-    printf("-i / --ignore - ignore this file/directory\n");
-    printf("-c / --config - read options from config file (multiple config files not supported)\n");
+    printf("-o,--once   - run only once\n");
+    printf("-h,--help   - show this help menu\n");
+    printf("-g,--git    - use only git tracked files\n");
+    printf("-i,--ignore - ignore this file/directory\n");
+    printf("-c,--config - read options from config file (multiple config files not supported)\n");
 }
 
 uint8_t strequal(char* a, char* b, unsigned int len) {
@@ -55,8 +55,8 @@ void parse_args(unsigned int argc, char** argv, ONSAVE_CONFIG* config) {
             } else {
                 switch (next_is_parameter) {
                     case IGNORE_FLAG: {
-                        config->ignore_list = realloc(config->ignore_list, ++config->ignore_len);
-                        config->ignore_list[config->ignore_len - 1] = arg_counter;
+                        config->ignore_arr = realloc(config->ignore_arr, ++config->ignore_len);
+                        config->ignore_arr[config->ignore_len - 1] = arg_counter;
                         break;
                     }
                     case CONFIG_FLAG: {
@@ -116,13 +116,47 @@ int main(int argc, char** argv) {
 
     // watch file
     char* filename = argv[config->target_idx];
-    printf("filename: %s\n", filename);
     int wd = inotify_add_watch(fd, filename, FLAGS);
 
     char buf[4096] = {0};
-    ssize_t len = read(fd, buf, sizeof(buf));
-    const struct inotify_event *event;
-    event = (struct inotify_event*) buf;
+    do {
+        ssize_t len = read(fd, buf, sizeof(buf));
+        const struct inotify_event *event;
+        for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
+            event = (struct inotify_event*) ptr;
+
+            if(event->mask & IN_DELETE) {
+                printf("IN_DELETE ");
+            }
+            if(event->mask & IN_DELETE_SELF) {
+                printf("IN_DELETE_SELF ");
+            }
+            if(event->mask & IN_MOVE_SELF) {
+                printf("IN_MOVE_SELF ");
+            }
+            if(event->mask & IN_MOVE) {
+                printf("IN_MOVE ");
+            }
+            if(event->mask & IN_CREATE) {
+                printf("IN_CREATE ");
+            }
+            if(event->mask & IN_MODIFY) {
+                printf("IN_MODIFY ");
+            }
+            if(event->mask & IN_ATTRIB) {
+                printf("IN_ATTRIB ");
+            }
+
+           if (event->mask & IN_ISDIR)
+               printf(" [directory]\n");
+           else
+               printf(" [file]\n");
+        }
+        printf("run command here\n");
+    } while(!(config->flags & ONCE_FLAG));
+
+    free(config->ignore_arr);
+    free(config);
 
     return 0;
 }
