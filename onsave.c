@@ -1,3 +1,4 @@
+#include <asm-generic/errno.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <stdio.h>
@@ -6,50 +7,110 @@
 #include <stdlib.h>
 
 #define MIN(a, b) a < b ? a : b;
-#define FLAGS IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVE | IN_CREATE | IN_MODIFY | IN_ATTRIB
+#define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVE | IN_CREATE | IN_MODIFY | IN_ATTRIB)
 #define ONCE_FLAG 1 // 0b00000001
 #define HELP_FLAG 2 // 0b00000010
 #define GIT_FLAG 4 // 0b00000100
 #define IGNORE_FLAG 8 // 0b00001000
-#define CONFIG_FLAG 16 // 0b00010000
-#define ERROR_FLAG 32 // 0b00100000
+#define VERBOSE_FLAG 16 // 0b00100000
+#define QUIET_FLAG 32 // 0b01000000
+#define ERROR_FLAG 64 // 0b10000000
 
-typedef struct ONSAVE_CONFIG {
+typedef struct {
     uint8_t flags;
-    unsigned int target_idx; // command start idx is this + 1
-    unsigned int config_idx;
+    unsigned int file_idx; // command start idx is this + 1
     unsigned int ignore_len;
     unsigned int* ignore_arr;
-} ONSAVE_CONFIG;
+} OnsaveConfig;
 
 void help() {
-    printf("onsave [OPTIONS] [FILE|DIRECTORY] [COMMAND...]\n");
-    printf("-o,--once   - run only once\n");
-    printf("-h,--help   - show this help menu\n");
-    printf("-g,--git    - use only git tracked files\n");
-    printf("-i,--ignore - ignore this file/directory\n");
-    printf("-c,--config - read options from config file (multiple config files not supported)\n");
+
+    printf("onsave [OPTIONS] FILE|DIRECTORY COMMAND\n");
+    printf("-o,--once    - run only once\n");
+    printf("-h,--help    - show this help menu\n");
+    printf("-g,--git     - monitor only git tracked files in the given directory\n");
+    printf("-i,--ignore  - ignore this file/directory (relative to given directory)\n");
+    printf("-q,--quiet   - no error output\n");
+    printf("-v,--verbose - verbose output\n");
+}
+
+void verbose_output(const struct inotify_event *event) {
+    // verbose output
+
+    if( !(event->mask & FLAGS) ) {
+        printf("event captured with no relevant action\n");
+        return;
+    }
+    printf("events detected:\n");
+    if(event->mask & IN_DELETE) {
+         printf("IN_DELETE (+) -> '/%s'", event->name);
+    }
+    if(event->mask & IN_DELETE_SELF) {
+        printf("IN_DELETE_SELF (watcher is implicitly removed)");
+    }
+    if(event->mask & IN_MOVE_SELF) {
+        printf("IN_MOVE_SELF");
+    }
+    if(event->mask & IN_MOVE) {
+        printf("IN_MOVE");
+    }
+    if(event->mask & IN_CREATE) {
+        printf("IN_CREATE (+) -> '/%s'", event->name);
+    }
+    if(event->mask & IN_MODIFY) {
+        printf("IN_MODIFY (+) -> '/%s'", event->name);
+    }
+    if(event->mask & IN_ATTRIB) {
+        printf("IN_ATTRIB (*) -> '/%s'", event->name);
+    }
+
+    if (event->mask & IN_ISDIR) {
+        printf(" [directory]\n");
+    } else {
+        printf(" [file]\n");
+    }
 }
 
 uint8_t strequal(char* a, char* b, unsigned int len) {
-    for(unsigned int i = 0; i < len; i++) {
-        if(a[i] != b[i]) return 0;
-    }
+    for(unsigned int i = 0; i < len; i++) if(a[i] != b[i]) return 0;
     return 1;
+}
+
+uint32_t strlength(char* a) {
+    uint32_t i;
+    for(i = 0; a[i] != 0; i++);
+    return i;
+}
+
+int is_ignored(OnsaveConfig* config, const struct inotify_event* event, char** argv) {
+    unsigned int filename_len = MIN(event->len, strlength((char*)event->name));
+    if(!filename_len) return 0;
+    for(uint32_t i = 0; i < config->ignore_len; i++) {
+        char* ignored = argv[config->ignore_arr[i]];
+        unsigned int min = MIN(filename_len, strlength(ignored));
+        if(strequal(ignored, (char*)event->name, min)) return 1;
+    }
+    return 0;
 }
 
 #define SET_BIT_AND_CONTINUE(var, bit) var |= bit; continue;
 
-void parse_args(unsigned int argc, char** argv, ONSAVE_CONFIG* config) {
+void parse_args(unsigned int argc, char** argv, OnsaveConfig* config) {
+
+    // nullify struct
+    for(unsigned int i = 0; i < sizeof(OnsaveConfig); i++) ((uint8_t*)config)[i] = 0x00;
+    // go through every command line argument
     uint8_t next_is_parameter = 0;
-    for(unsigned int arg_counter = 1; arg_counter < argc; arg_counter++) {
+    for(unsigned int arg_counter = 1; arg_counter < argc && !(config->flags & ERROR_FLAG); arg_counter++) {
         char* arg = argv[arg_counter];
         // not argument
         if(arg[0] != '-') {
             // arg list end
             if(!next_is_parameter) {
-                if(arg_counter == argc - 1) config->flags |= ERROR_FLAG;
-                config->target_idx = arg_counter;
+                if(arg_counter == argc - 1) {
+                    SET_BIT_AND_CONTINUE(config->flags, ERROR_FLAG);
+                }
+                config->file_idx = arg_counter;
                 return;
             // parameter
             } else {
@@ -59,52 +120,56 @@ void parse_args(unsigned int argc, char** argv, ONSAVE_CONFIG* config) {
                         config->ignore_arr[config->ignore_len - 1] = arg_counter;
                         break;
                     }
-                    case CONFIG_FLAG: {
-                        config->config_idx = arg_counter;
-                        break;
+                    default: {
+                        config->flags |= ERROR_FLAG;
                     }
                 }
+                next_is_parameter = 0;
             }
         } else {
             uint8_t long_name_offset = arg[1] == '-';
             switch(arg[1 + long_name_offset]) {
-                case 'h': { // help
+                case 'h': {
                     SET_BIT_AND_CONTINUE(config->flags, HELP_FLAG);
                 }
-                case 'o': { // once
+                case 'o': {
                     SET_BIT_AND_CONTINUE(config->flags, ONCE_FLAG);
                 }
-                case 'g': { // git
+                case 'g': {
                     SET_BIT_AND_CONTINUE(config->flags, GIT_FLAG);
                 }
-                case 'i': { // ignore
+                case 'i': {
                     SET_BIT_AND_CONTINUE(next_is_parameter, IGNORE_FLAG);
                 }
-                case 'c': { // config
-                    SET_BIT_AND_CONTINUE(next_is_parameter, CONFIG_FLAG);
+                case 'v': {
+                    SET_BIT_AND_CONTINUE(config->flags, VERBOSE_FLAG);
+                }
+                case 'q': {
+                    SET_BIT_AND_CONTINUE(config->flags, QUIET_FLAG);
+                }
+                default: {
+                    SET_BIT_AND_CONTINUE(config->flags, ERROR_FLAG);
                 }
             }
         }
-        next_is_parameter = 0;
     }
 }
 
 int main(int argc, char** argv) {
 
-    // check if there is enough arguments
+    // check if there is enough arguments (program, file/directory and command at least)
     if(argc < 3) {
         help();
         exit(EXIT_FAILURE);
     }
     // get arguments
-    ONSAVE_CONFIG* config = malloc(sizeof(ONSAVE_CONFIG));
-    for(unsigned int i = 0; i < sizeof(ONSAVE_CONFIG); i++) ((uint8_t*)config)[i] = 0x00;
-    parse_args(argc, argv, config);
+    OnsaveConfig config;
+    parse_args(argc, argv, &config);
 
     // throw parsing error
-    if(config->flags & ERROR_FLAG || config->flags & HELP_FLAG) {
-        help();
-        exit(config->flags & ERROR_FLAG ? EXIT_FAILURE : EXIT_SUCCESS);
+    if(config.flags & ERROR_FLAG || config.flags & HELP_FLAG) {
+        if(!(config.flags & QUIET_FLAG)) help();
+        exit(config.flags & ERROR_FLAG ? EXIT_FAILURE : EXIT_SUCCESS);
     }
 
     // initialize inotify_init
@@ -115,48 +180,45 @@ int main(int argc, char** argv) {
     }
 
     // watch file
-    char* filename = argv[config->target_idx];
+    char* filename = argv[config.file_idx];
     int wd = inotify_add_watch(fd, filename, FLAGS);
 
     char buf[4096] = {0};
+
     do {
         ssize_t len = read(fd, buf, sizeof(buf));
         const struct inotify_event *event;
         for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
             event = (struct inotify_event*) ptr;
 
-            if(event->mask & IN_DELETE) {
-                printf("IN_DELETE ");
-            }
-            if(event->mask & IN_DELETE_SELF) {
-                printf("IN_DELETE_SELF ");
-            }
-            if(event->mask & IN_MOVE_SELF) {
-                printf("IN_MOVE_SELF ");
-            }
-            if(event->mask & IN_MOVE) {
-                printf("IN_MOVE ");
-            }
-            if(event->mask & IN_CREATE) {
-                printf("IN_CREATE ");
-            }
-            if(event->mask & IN_MODIFY) {
-                printf("IN_MODIFY ");
-            }
-            if(event->mask & IN_ATTRIB) {
-                printf("IN_ATTRIB ");
+            if(event->mask & FLAGS) {
+                if(!is_ignored(&config, event, argv)) { 
+                    system(argv[config.file_idx+1]);
+                    ptr = buf + len;
+                    continue;
+                }
             }
 
-           if (event->mask & IN_ISDIR)
-               printf(" [directory]\n");
-           else
-               printf(" [file]\n");
+            if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
+
+            if(event->mask & IN_UNMOUNT) {
+                if(!(config.flags & QUIET_FLAG)) fprintf(stderr, "ERROR: filesystem was unmounted\n");
+                exit(EXIT_FAILURE);
+            }
+
+            if(event->mask & IN_IGNORED) {
+                // remove watch
+                close(fd);
+                if( ( fd = inotify_init() ) == -1 ) {
+                    perror("inotify_init");
+                    exit(EXIT_FAILURE);
+                }
+                wd = inotify_add_watch(fd, filename, FLAGS);
+            }
         }
-        printf("run command here\n");
-    } while(!(config->flags & ONCE_FLAG));
+    } while(!(config.flags & ONCE_FLAG));
 
-    free(config->ignore_arr);
-    free(config);
+    free(config.ignore_arr);
 
     return 0;
 }
