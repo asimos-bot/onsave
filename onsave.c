@@ -189,44 +189,38 @@ int main(int argc, char** argv) {
 
     // watch file
     int wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
+    struct inotify_event *event;
 
     do {
         ssize_t len = read(fd, buf, sizeof(buf));
-        const struct inotify_event *event;
-        for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
-            event = (struct inotify_event*) ptr;
+        event = (struct inotify_event*) buf;
 
-            if(event->mask & FLAGS) {
-                if(!is_ignored(&config, event, argv)) { 
-                    system(argv[config.file_idx+1]);
+        if(event->mask & FLAGS) {
+            if(!is_ignored(&config, event, argv)) { 
+                system(argv[config.file_idx+1]);
 
-                    if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
-                    ptr = buf + len;
-                    continue;
-                }
+                if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
+                continue;
             }
+        }
 
-            if(event->mask & IN_UNMOUNT) {
-                if(!(config.flags & QUIET_FLAG)) fprintf(stderr, "ERROR: filesystem was unmounted\n");
+        if(event->mask & IN_UNMOUNT) {
+            if(!(config.flags & QUIET_FLAG)) fprintf(stderr, "ERROR: filesystem was unmounted\n");
+            exit(EXIT_FAILURE);
+        }
+
+        if(event->mask & IN_IGNORED) {
+
+            close(fd);
+            // initialize inotify_init
+            fd = inotify_init();
+            if( fd == -1 ) {
+                perror("inotify_init");
                 exit(EXIT_FAILURE);
             }
 
-            if(event->mask & IN_IGNORED) {
-
-                close(fd);
-                // initialize inotify_init
-                fd = inotify_init();
-                if( fd == -1 ) {
-                    perror("inotify_init");
-                    exit(EXIT_FAILURE);
-                }
-
-                // watch file
-                wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
-
-                ptr = buf + len;
-                continue;
-            }
+            // watch file
+            wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
         }
     } while(!(config.flags & ONCE_FLAG));
 
