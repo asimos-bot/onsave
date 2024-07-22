@@ -7,9 +7,9 @@
 #include <stdlib.h>
 
 #define MIN(a, b) a < b ? a : b;
-#define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVE | IN_CREATE | IN_MODIFY | IN_ATTRIB)
-// #define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_CLOSE_WRITE)
-#define WATCH_FLAGS FLAGS | IN_MASK_ADD | IN_ONESHOT | IN_EXCL_UNLINK
+#define FLAGS (IN_CLOSE_WRITE)
+// #define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_CLOSE_WRITE | IN_MOVE | IN_CREATE | IN_MODIFY | IN_ATTRIB)
+#define WATCH_FLAGS FLAGS | IN_MASK_ADD | IN_EXCL_UNLINK
 #define ONCE_FLAG 1 // 0b00000001
 #define HELP_FLAG 2 // 0b00000010
 #define GIT_FLAG 4 // 0b00000100
@@ -178,20 +178,19 @@ int main(int argc, char** argv) {
     }
 
     char buf[4096] = {0};
+    char* filename = argv[config.file_idx];
+
+    // initialize inotify_init
+    int fd = inotify_init();
+    if( fd == -1 ) {
+        perror("inotify_init");
+        exit(EXIT_FAILURE);
+    }
+
+    // watch file
+    int wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
 
     do {
-
-        // initialize inotify_init
-        int fd = inotify_init();
-        if( fd == -1 ) {
-            perror("inotify_init");
-            exit(EXIT_FAILURE);
-        }
-
-        // watch file
-        char* filename = argv[config.file_idx];
-        int wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
-
         ssize_t len = read(fd, buf, sizeof(buf));
         const struct inotify_event *event;
         for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
@@ -202,7 +201,6 @@ int main(int argc, char** argv) {
                     system(argv[config.file_idx+1]);
 
                     if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
-                    sleep(1);
                     ptr = buf + len;
                     continue;
                 }
@@ -214,6 +212,18 @@ int main(int argc, char** argv) {
             }
 
             if(event->mask & IN_IGNORED) {
+
+                close(fd);
+                // initialize inotify_init
+                fd = inotify_init();
+                if( fd == -1 ) {
+                    perror("inotify_init");
+                    exit(EXIT_FAILURE);
+                }
+
+                // watch file
+                wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
+
                 ptr = buf + len;
                 continue;
             }

@@ -37,4 +37,4 @@ make build
 
 ## Troubleshooting
 
-Vim and neovim users may want to set `backupcopy` to `false` to avoid false positives due to the "4913" file.
+Vim and neovim users may want to set `backupcopy` to `false` to avoid false positives due to the temporary `4913` file.
