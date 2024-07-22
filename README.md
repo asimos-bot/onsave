@@ -33,5 +33,8 @@ make build
 - [x] reapply watcher for events like:
     * IN_DELETE_SELF
 - [x] ignore all files given with the `-i` flag
-- [ ] ignore files according to .gitignore
 - [ ] recursive directory monitoring
+
+## Troubleshooting
+
+Vim and neovim users may want to set `backupcopy` to `false` to avoid false positives due to the "4913" file.

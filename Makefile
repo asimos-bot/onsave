@@ -5,7 +5,7 @@ CC=clang
 build:
 	 $(CC) $(TARGET).c -o $(TARGET)
 run: build
-	./$(TARGET) -q -v -i a -i b test "echo hello"
+	./$(TARGET) -v -i a -i b test "sleep 0.5; echo hello"
 install: build
 	mkdir -p ~/.local/bin/
 	cp $(TARGET) ~/.local/bin/

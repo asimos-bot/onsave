@@ -8,6 +8,8 @@
 
 #define MIN(a, b) a < b ? a : b;
 #define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVE | IN_CREATE | IN_MODIFY | IN_ATTRIB)
+// #define FLAGS (IN_DELETE | IN_DELETE_SELF | IN_CLOSE_WRITE)
+#define WATCH_FLAGS FLAGS | IN_MASK_ADD | IN_ONESHOT | IN_EXCL_UNLINK
 #define ONCE_FLAG 1 // 0b00000001
 #define HELP_FLAG 2 // 0b00000010
 #define GIT_FLAG 4 // 0b00000100
@@ -43,7 +45,7 @@ void verbose_output(const struct inotify_event *event) {
     }
     printf("events detected:\n");
     if(event->mask & IN_DELETE) {
-         printf("IN_DELETE (+) -> '/%s'", event->name);
+         printf("IN_DELETE (+) -> '%s'", event->name);
     }
     if(event->mask & IN_DELETE_SELF) {
         printf("IN_DELETE_SELF (watcher is implicitly removed)");
@@ -52,16 +54,19 @@ void verbose_output(const struct inotify_event *event) {
         printf("IN_MOVE_SELF");
     }
     if(event->mask & IN_MOVE) {
-        printf("IN_MOVE");
+        printf("IN_MOVE '%s'", event->name);
+    }
+    if(event->mask & IN_CLOSE_WRITE) {
+        printf("IN_CLOSE_WRITE (+) -> '%s'", event->name);
     }
     if(event->mask & IN_CREATE) {
-        printf("IN_CREATE (+) -> '/%s'", event->name);
+        printf("IN_CREATE (+) -> '%s'", event->name);
     }
     if(event->mask & IN_MODIFY) {
-        printf("IN_MODIFY (+) -> '/%s'", event->name);
+        printf("IN_MODIFY (+) -> '%s'", event->name);
     }
     if(event->mask & IN_ATTRIB) {
-        printf("IN_ATTRIB (*) -> '/%s'", event->name);
+        printf("IN_ATTRIB (*) -> '%s'", event->name);
     }
 
     if (event->mask & IN_ISDIR) {
@@ -172,20 +177,21 @@ int main(int argc, char** argv) {
         exit(config.flags & ERROR_FLAG ? EXIT_FAILURE : EXIT_SUCCESS);
     }
 
-    // initialize inotify_init
-    int fd = inotify_init();
-    if( fd == -1 ) {
-        perror("inotify_init");
-        exit(EXIT_FAILURE);
-    }
-
-    // watch file
-    char* filename = argv[config.file_idx];
-    int wd = inotify_add_watch(fd, filename, FLAGS);
-
     char buf[4096] = {0};
 
     do {
+
+        // initialize inotify_init
+        int fd = inotify_init();
+        if( fd == -1 ) {
+            perror("inotify_init");
+            exit(EXIT_FAILURE);
+        }
+
+        // watch file
+        char* filename = argv[config.file_idx];
+        int wd = inotify_add_watch(fd, filename, WATCH_FLAGS);
+
         ssize_t len = read(fd, buf, sizeof(buf));
         const struct inotify_event *event;
         for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + event->len) {
@@ -194,12 +200,13 @@ int main(int argc, char** argv) {
             if(event->mask & FLAGS) {
                 if(!is_ignored(&config, event, argv)) { 
                     system(argv[config.file_idx+1]);
+
+                    if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
+                    sleep(1);
                     ptr = buf + len;
                     continue;
                 }
             }
-
-            if( (config.flags & VERBOSE_FLAG) && !(config.flags & QUIET_FLAG) ) verbose_output(event);
 
             if(event->mask & IN_UNMOUNT) {
                 if(!(config.flags & QUIET_FLAG)) fprintf(stderr, "ERROR: filesystem was unmounted\n");
@@ -207,13 +214,8 @@ int main(int argc, char** argv) {
             }
 
             if(event->mask & IN_IGNORED) {
-                // remove watch
-                close(fd);
-                if( ( fd = inotify_init() ) == -1 ) {
-                    perror("inotify_init");
-                    exit(EXIT_FAILURE);
-                }
-                wd = inotify_add_watch(fd, filename, FLAGS);
+                ptr = buf + len;
+                continue;
             }
         }
     } while(!(config.flags & ONCE_FLAG));
